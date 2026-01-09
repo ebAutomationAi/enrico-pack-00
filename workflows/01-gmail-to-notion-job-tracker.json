@@ -1,0 +1,236 @@
+{
+  "name": "01 - Gmail → Notion Job Tracker (Pack-00)",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyX",
+              "value": 1,
+              "unit": "minutes"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "readStatus": "unread"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -920,
+        0
+      ],
+      "id": "d8f8c9f1-2c2a-4f0b-9c3b-9d2f34d0a3a1",
+      "name": "Gmail Trigger",
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "messageId": "={{ $json.id }}"
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -680,
+        0
+      ],
+      "id": "0e64a2b7-3d7b-4f41-9f6d-5a2e1c97cf6b",
+      "name": "Gmail - Get message",
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const msg = $json;\n\n// Headers suelen venir en msg.payload.headers (Gmail API)\nconst rawHeaders = msg?.payload?.headers || msg?.headers || [];\nconst headerMap = {};\nfor (const h of rawHeaders) {\n  if (!h?.name) continue;\n  headerMap[String(h.name).toLowerCase()] = String(h.value ?? '');\n}\nconst getH = (name) => headerMap[String(name).toLowerCase()] || '';\n\nconst subject = (getH('subject') || msg.subject || '').toString().trim();\nconst fromRaw = (getH('from') || msg.from || '').toString().trim();\nconst dateRaw = (getH('date') || msg.date || '').toString().trim();\nconst snippet = (msg.snippet || '').toString();\n\nlet fromEmail = '';\nlet fromName = '';\n\n// Ej: \"Company HR\" <hr@company.com>\nconst m = fromRaw.match(/^(.*)<([^>]+)>/);\nif (m) {\n  fromName = (m[1] || '').replace(/\"/g, '').trim();\n  fromEmail = (m[2] || '').trim();\n} else {\n  // Si solo viene el email o un texto raro\n  fromEmail = fromRaw;\n}\n\nlet receivedIso = '';\ntry {\n  const d = new Date(dateRaw);\n  if (!Number.isNaN(d.getTime())) receivedIso = d.toISOString();\n} catch (e) {}\n\nreturn [\n  {\n    json: {\n      gmail_message_id: msg.id,\n      gmail_thread_id: msg.threadId,\n      subject,\n      from_name: (fromName || fromEmail || '').trim(),\n      from_email: (fromEmail || '').trim(),\n      received_iso: receivedIso,\n      snippet\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -440,
+        0
+      ],
+      "id": "c35a2db5-bb2e-4f2c-bf77-7efb3bc5b0d4",
+      "name": "Parse email fields"
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "value": "YOUR_NOTION_DATABASE_ID",
+          "mode": "id"
+        },
+        "title": "={{ $json.subject || 'New Job Email' }}",
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Status|select",
+              "selectValue": "NEW"
+            },
+            {
+              "key": "From Email|email",
+              "emailValue": "={{ $json.from_email }}"
+            },
+            {
+              "key": "From Name|rich_text",
+              "textContent": "={{ $json.from_name }}"
+            },
+            {
+              "key": "Subject|rich_text",
+              "textContent": "={{ $json.subject }}"
+            },
+            {
+              "key": "Snippet|rich_text",
+              "textContent": "={{ $json.snippet }}"
+            },
+            {
+              "key": "Gmail Message Id|rich_text",
+              "textContent": "={{ $json.gmail_message_id }}"
+            },
+            {
+              "key": "Gmail Thread Id|rich_text",
+              "textContent": "={{ $json.gmail_thread_id }}"
+            },
+            {
+              "key": "Received|date",
+              "includeTime": true,
+              "date": "={{ $json.received_iso || $now.toISO() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [
+        -200,
+        0
+      ],
+      "id": "2e2b7c3c-64f3-4f8f-b93b-6b6f118b9c6b",
+      "name": "Notion - Create job row",
+      "credentials": {
+        "notionApi": {
+          "name": "Notion API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {
+          "includeUnpaired": false
+        }
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        40,
+        120
+      ],
+      "id": "f7b0a1c2-1b1c-4a6b-8c1a-1fb1d9d4a8b3",
+      "name": "Merge (keep gmail ids)"
+    },
+    {
+      "parameters": {
+        "operation": "markAsRead",
+        "messageId": "={{ $json.gmail_message_id }}"
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        280,
+        120
+      ],
+      "id": "dfe5e77a-77b5-4fd4-a0a2-3c5d6e2b3d11",
+      "name": "Gmail - Mark as read",
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Gmail - Get message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - Get message": {
+      "main": [
+        [
+          {
+            "node": "Parse email fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse email fields": {
+      "main": [
+        [
+          {
+            "node": "Notion - Create job row",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge (keep gmail ids)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notion - Create job row": {
+      "main": [
+        [
+          {
+            "node": "Merge (keep gmail ids)",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge (keep gmail ids)": {
+      "main": [
+        [
+          {
+            "node": "Gmail - Mark as read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "timezone": "Europe/Madrid"
+  },
+  "pinData": {},
+  "staticData": null,
+  "tags": []
+}
